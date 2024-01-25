@@ -41,15 +41,25 @@ pub trait MaterialSource {
     fn texture_sources(&self) -> Iter<BinaryTexture>;
 }
 
+// How would we represent a MaterialSource as just a struct?
+struct MaterialSource2<'a> {
+    name: &'static str,
+    textures: Vec<BinaryTexture<'a>>,
+}
+
 pub struct Material {
     name: &'static str,
-    textures: Vec<Texture>,
+    _textures: Vec<Texture>,
     bind_group: BindGroup,
 }
 
 impl Material {
     pub fn name(&self) -> &'static str {
         self.name
+    }
+
+    pub fn from_source2(source: &MaterialSource, device: &Device, queue: &Queue) -> Self {
+        
     }
 
     pub fn from_source(source: &dyn MaterialSource, device: &Device, queue: &Queue) -> Self {
@@ -123,8 +133,12 @@ impl Material {
 
         Self {
             name: source.name(),
-            textures,
+            _textures: textures,
             bind_group,
         }
+    }
+
+    pub fn bind_group(&self) -> &BindGroup {
+        &self.bind_group
     }
 }

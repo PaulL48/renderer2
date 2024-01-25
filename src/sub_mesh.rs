@@ -44,10 +44,14 @@
 // but may have variants in other shader programs, so it could be more of a contract
 // that a user data type can fulfil
 
+use std::collections::HashMap;
+
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
-    Buffer, BufferUsages, Device, IndexFormat,
+    Buffer, BufferUsages, Device, IndexFormat, RenderPass,
 };
+
+use crate::material::Material;
 
 pub trait SubMeshSource {
     // Return the vertex data as it will be present in the GPU buffer
@@ -95,6 +99,19 @@ impl SubMesh {
             index_type: source.index_type(),
             material: source.material(),
         }
+    }
+
+    pub fn record_commands<'a>(
+        &'a self,
+        render_pass: &mut RenderPass<'a>,
+        first_available_bind_group: u32,
+        material_cache: &'a HashMap<&'static str, Material>,
+    ) {
+        let material = material_cache.get(self.material).unwrap();
+        render_pass.set_bind_group(first_available_bind_group, material.bind_group(), &[]);
+        render_pass.set_vertex_buffer(0, self.vertices.slice(..));
+        render_pass.set_index_buffer(self.indices.slice(..), self.index_type);
+        render_pass.draw_indexed(0..self.index_count, 0, 0..1);
     }
 }
 

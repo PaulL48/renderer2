@@ -13,19 +13,28 @@
 // Some challenges:
 // The render pass is a temporary object that only exists briefly to allow command buffer creation
 
+use std::collections::HashMap;
+
+use slot_map::SlotMap;
 use wgpu::{
-    BindGroupLayout, BindGroupLayoutDescriptor, PipelineLayoutDescriptor, RenderPipeline,
-    RenderPipelineDescriptor, TextureFormat, VertexState,
+    BindGroup, BindGroupLayout, BindGroupLayoutDescriptor,
+    CommandEncoderDescriptor, Device, PipelineLayoutDescriptor, Queue, RenderPassDescriptor,
+    RenderPipeline, RenderPipelineDescriptor, StoreOp, TextureFormat, TextureView, VertexState,
 };
 
-use crate::{pipeline_configuration::PipelineConfiguration, Renderer};
+use crate::{
+    material::Material,
+    mesh::{Mesh, MeshHandle},
+    pipeline_configuration::PipelineConfiguration,
+    Renderer,
+};
 
 pub struct Pipeline {
     pipeline: RenderPipeline,
     configuration: PipelineConfiguration,
     bind_group_layouts: Vec<BindGroupLayout>,
-
-    
+    global_bind_groups: Vec<BindGroup>,
+    draw_queue: Vec<MeshHandle>,
 }
 
 impl Pipeline {
@@ -104,6 +113,143 @@ impl Pipeline {
             pipeline,
             configuration,
             bind_group_layouts,
+            global_bind_groups: Vec::new(),
+            draw_queue: Vec::new(),
         })
     }
+
+    pub fn submit_mesh(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        render_target: &TextureView,
+        depth_texture: &TextureView,
+        mesh: MeshHandle,
+        mesh_cache: &SlotMap<Mesh>,
+        material_cache: &HashMap<&'static str, Material>,
+    ) {
+        self.draw_queue.push(mesh);
+
+        // Check the heuristic for submission
+        if self.draw_queue.len() >= 5 {
+            self.submit_pending_draws(
+                device,
+                queue,
+                render_target,
+                depth_texture,
+                mesh_cache,
+                material_cache,
+            );
+        }
+    }
+
+    pub fn add_global_bind_group(&mut self) {
+        todo!()
+    }
+
+    pub fn flush_queue(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        render_target: &TextureView,
+        depth_texture: &TextureView,
+        mesh_cache: &SlotMap<Mesh>,
+        material_cache: &HashMap<&'static str, Material>,
+    ) {
+        if self.draw_queue.is_empty() {
+            return;
+        }
+
+        self.submit_pending_draws(
+            device,
+            queue,
+            render_target,
+            depth_texture,
+            mesh_cache,
+            material_cache,
+        );
+    }
+
+    fn submit_pending_draws(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        render_target: &TextureView,
+        depth_texture: &TextureView,
+        mesh_cache: &SlotMap<Mesh>,
+        material_cache: &HashMap<&'static str, Material>,
+    ) {
+        // Submit this work
+        // create
+
+        // Do any data synchronization that the models need
+
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+        {
+            let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: render_target,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_texture,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            // Set pipeline
+            render_pass.set_pipeline(&self.pipeline);
+
+            // Set global bind groups
+            for (i, global_bind_group) in self.global_bind_groups.iter().enumerate() {
+                render_pass.set_bind_group(i as u32, global_bind_group, &[]);
+            }
+
+            // Record commands
+            for mesh_handle in &self.draw_queue {
+                let mesh = mesh_cache.get(mesh_handle).unwrap();
+                mesh.record_commands(&mut render_pass, 1, material_cache);
+            }
+        }
+
+        let command_buffer = encoder.finish();
+        queue.submit([command_buffer]);
+    }
 }
+
+// This seems logical:
+// Each variant of BindingType is being covered in different pathways
+// to do their own things
+
+// For Sampler/Texture we've got Material
+
+// For Buffer we'll have its own thing too
+
+// We want to make it rather more generic than the previous way the camera was setup
+// but at the same time we don't want to make setting the camera as a pipeline global
+// annoying for *every* pipeline
+
+// What do we need? We need a &[u8] and an entry layout for every buffer entry
+// Though even then the layout for a buffer entry is pretty simple and the same for
+// every single one, unless it wants to specify an offset
+
+// The other unique consideration here is that we're likely updating these buffers
+// every frame for the camera.
+
+// We could use a handle: BufferHandle or UniformHandle
+
+// The other consideration is that we don't have a handle to a buffer,
+// we have a handle to a bind group element
+
+// but in the end we update buffers and bind bind groups

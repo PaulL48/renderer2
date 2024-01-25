@@ -1,20 +1,19 @@
 use crate::{
-    material::{MaterialSource, Material},
-    mesh::MeshSource,
-    mesh_cache::{MeshCache, MeshHandle},
+    material::{Material, MaterialSource},
+    mesh::{Mesh, MeshHandle, MeshSource},
     pipeline::Pipeline,
     pipeline_configuration::PipelineConfiguration,
     renderer_configuration::RendererConfiguration,
-    texture::Texture,
+    texture::Texture, foo::BindGroupSource,
 };
-use log::warn;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use slot_map::{SlotMap, SlotMapIndex};
 use std::collections::{HashMap, HashSet};
 use wgpu::{
-    CommandBuffer, Device, DeviceDescriptor, Dx12Compiler, Features, Gles3MinorVersion, Instance,
-    InstanceDescriptor, Limits, PowerPreference, PresentMode, Queue, RequestAdapterOptions,
-    Surface, SurfaceConfiguration, TextureFormat,
+    Color, CommandEncoderDescriptor, Device, DeviceDescriptor, Dx12Compiler, Features,
+    Gles3MinorVersion, Instance, InstanceDescriptor, Limits, PowerPreference, PresentMode, Queue,
+    RenderPassDescriptor, RequestAdapterOptions, StoreOp, Surface, SurfaceConfiguration,
+    SurfaceTexture, TextureFormat, TextureView,
 };
 
 pub struct Renderer {
@@ -23,14 +22,15 @@ pub struct Renderer {
     device: Device,
     queue: Queue,
     depth_texture: Texture,
-    command_buffers: Vec<CommandBuffer>,
-
+    // command_buffers: Vec<CommandBuffer>,
     pipelines: SlotMap<Pipeline>,
     pipeline_lookup: HashMap<PipelineConfiguration, SlotMapIndex>,
 
-
-    mesh_cache: MeshCache, // The meshes/sub_meshes need to be accessed when the mesh handle is returned
+    mesh_cache: SlotMap<Mesh>, // The meshes/sub_meshes need to be accessed when the mesh handle is returned
     material_cache: HashMap<&'static str, Material>,
+
+    surface_texture: Option<SurfaceTexture>,
+    surface_view: Option<TextureView>,
 }
 
 impl Renderer {
@@ -116,17 +116,34 @@ impl Renderer {
             &Renderer::DEPTH_FORMAT,
         );
 
+        let output = match surface.get_current_texture() {
+            Ok(output) => output,
+            Err(err) => panic!("Could not get surface for rendering: {}", err),
+        };
+
+        let view = output.texture.create_view(&wgpu::TextureViewDescriptor {
+            label: None,
+            format: Some(surface_configuration.format),
+            dimension: None,
+            aspect: wgpu::TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: None,
+            base_array_layer: 0,
+            array_layer_count: None,
+        });
+
         Ok(Self {
             surface,
             surface_configuration,
             device,
             queue,
             depth_texture,
-            command_buffers: Vec::new(),
             pipelines: SlotMap::with_capacity(12),
             pipeline_lookup: HashMap::new(),
-            mesh_cache: MeshCache::with_capacity(12),
+            mesh_cache: SlotMap::with_capacity(12),
             material_cache: HashMap::new(),
+            surface_texture: Some(output),
+            surface_view: Some(view),
         })
     }
 
@@ -150,7 +167,8 @@ impl Renderer {
     // Having separate mesh and material registration might be
     // problematic.
     pub fn register_mesh(&mut self, mesh_source: &dyn MeshSource) -> MeshHandle {
-        self.mesh_cache.insert(&self.device, mesh_source)
+        let mesh = Mesh::from_source(&self.device, &self.pipeline_lookup, mesh_source);
+        self.mesh_cache.push(mesh)
     }
 
     pub fn register_material(&mut self, material_source: &dyn MaterialSource) {
@@ -158,21 +176,61 @@ impl Renderer {
         self.material_cache.insert(material.name(), material);
     }
 
-    pub fn unregister_mesh() { todo!() }
-    pub fn unregister_material() { todo!() }
+    pub fn unregister_mesh() {
+        todo!()
+    }
+    pub fn unregister_material() {
+        todo!()
+    }
 
-    pub fn submit_mesh() {}
+    pub fn submit_mesh(&mut self, mesh_handle: MeshHandle) {
+        let mesh = self.mesh_cache.get(&mesh_handle).unwrap();
+
+        self.pipelines
+            .get_mut(mesh.pipeline())
+            .unwrap()
+            .submit_mesh(
+                &self.device,
+                &self.queue,
+                self.surface_view.as_ref().unwrap(),
+                self.depth_texture.view(),
+                mesh_handle,
+                &self.mesh_cache,
+                &self.material_cache,
+            );
+    }
+
+    pub fn add_pipeline_global(&mut self, pipeline: &PipelineConfiguration, bind_group_source: &dyn BindGroupSource) {
+        
+    }
 
     pub fn render(&mut self) {
-        let output = match self.surface.get_current_texture() {
-            Ok(output) => output,
-            Err(err) => {
-                warn!("Could not get surface for rendering: {}", err);
-                return;
-            }
-        };
+        // Force all pipelines to submit now
+        for pipeline in &mut self.pipelines {
+            pipeline.flush_queue(
+                &self.device,
+                &self.queue,
+                self.surface_view.as_ref().unwrap(),
+                self.depth_texture.view(),
+                &self.mesh_cache,
+                &self.material_cache,
+            )
+        }
 
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor {
+        {
+            // Take and present the built surface
+            let texture = self.surface_texture.take().unwrap();
+            self.surface_view.take().unwrap();
+            texture.present();
+        }
+
+        // Reacquire surfaces
+        let texture = self
+            .surface
+            .get_current_texture()
+            .expect("Could not get next frame buffer");
+
+        let view = texture.texture.create_view(&wgpu::TextureViewDescriptor {
             label: None,
             format: Some(self.surface_configuration.format),
             dimension: None,
@@ -183,6 +241,45 @@ impl Renderer {
             array_layer_count: None,
         });
 
+        self.surface_texture = Some(texture);
+        self.surface_view = Some(view);
+
+        // Provide a basic clear op immediately
+        // It is unlikely that the GPU is busy at this point so there should
+        // be low performance impact
+        let mut encoder = self
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor { label: None });
+        encoder.begin_render_pass(&RenderPassDescriptor {
+            label: Some("Clear"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: self.surface_view.as_ref().unwrap(),
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(Color {
+                        r: 0.6,
+                        g: 0.6,
+                        b: 0.6,
+                        a: 0.6,
+                    }),
+                    store: StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: self.depth_texture.view(),
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        let commands = encoder.finish();
+        self.queue.submit([commands]);
+
         // Instead of assigning a pipeline to create the command to clear the
         // view we should do that right here
 
@@ -191,7 +288,7 @@ impl Renderer {
 
         // CommandEncoders are generated lifetime-free so this is the break
         // point
-        
+
         // Nvidia recommends 5-10 equivalents of queue.submit
         // And it recommends that they are dispatched *throughout* the frame generation
         // rather than only at the end
@@ -242,7 +339,7 @@ impl Renderer {
         // overhead to every mesh_submit call
         //
         // Lets think: So technically if we name a lifetime for the encoder
-        // and the render pass, they are identical, so the 
+        // and the render pass, they are identical, so the
     }
 }
 
