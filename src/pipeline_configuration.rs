@@ -1,3 +1,5 @@
+// Creates a codependency on WGPU
+
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct PipelineConfiguration {
     pub shader_path: String,

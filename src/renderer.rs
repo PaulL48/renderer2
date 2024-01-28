@@ -1,10 +1,12 @@
 use crate::{
     material::{Material, MaterialSource},
+    material_cache::MaterialCache,
     mesh::{Mesh, MeshHandle, MeshSource},
     pipeline::Pipeline,
     pipeline_configuration::PipelineConfiguration,
     renderer_configuration::RendererConfiguration,
-    texture::Texture, foo::BindGroupSource,
+    texture::Texture,
+    uniform_group::UniformGroupSource,
 };
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use slot_map::{SlotMap, SlotMapIndex};
@@ -27,7 +29,7 @@ pub struct Renderer {
     pipeline_lookup: HashMap<PipelineConfiguration, SlotMapIndex>,
 
     mesh_cache: SlotMap<Mesh>, // The meshes/sub_meshes need to be accessed when the mesh handle is returned
-    material_cache: HashMap<&'static str, Material>,
+    material_cache: MaterialCache,
 
     surface_texture: Option<SurfaceTexture>,
     surface_view: Option<TextureView>,
@@ -141,7 +143,7 @@ impl Renderer {
             pipelines: SlotMap::with_capacity(12),
             pipeline_lookup: HashMap::new(),
             mesh_cache: SlotMap::with_capacity(12),
-            material_cache: HashMap::new(),
+            material_cache: MaterialCache::new(),
             surface_texture: Some(output),
             surface_view: Some(view),
         })
@@ -166,14 +168,14 @@ impl Renderer {
 
     // Having separate mesh and material registration might be
     // problematic.
-    pub fn register_mesh(&mut self, mesh_source: &dyn MeshSource) -> MeshHandle {
+    pub fn register_mesh(&mut self, mesh_source: &MeshSource) -> MeshHandle {
         let mesh = Mesh::from_source(&self.device, &self.pipeline_lookup, mesh_source);
         self.mesh_cache.push(mesh)
     }
 
-    pub fn register_material(&mut self, material_source: &dyn MaterialSource) {
+    pub fn register_material(&mut self, material_source: &MaterialSource) {
         let material = Material::from_source(material_source, &self.device, &self.queue);
-        self.material_cache.insert(material.name(), material);
+        self.material_cache.insert(material.id(), material);
     }
 
     pub fn unregister_mesh() {
@@ -200,8 +202,14 @@ impl Renderer {
             );
     }
 
-    pub fn add_pipeline_global(&mut self, pipeline: &PipelineConfiguration, bind_group_source: &dyn BindGroupSource) {
-        
+    pub fn add_pipeline_global(
+        &mut self,
+        pipeline: &PipelineConfiguration,
+        uniform_group: &UniformGroupSource,
+    ) {
+        let pipeline = self.pipeline_lookup.get(pipeline).unwrap();
+        let pipeline = self.pipelines.get_mut(pipeline).unwrap();
+        pipeline.add_global_bind_group(uniform_group, &self.device);
     }
 
     pub fn render(&mut self) {
@@ -279,75 +287,5 @@ impl Renderer {
 
         let commands = encoder.finish();
         self.queue.submit([commands]);
-
-        // Instead of assigning a pipeline to create the command to clear the
-        // view we should do that right here
-
-        // Here we need to generate all the command buffers needed to render
-        // the frame
-
-        // CommandEncoders are generated lifetime-free so this is the break
-        // point
-
-        // Nvidia recommends 5-10 equivalents of queue.submit
-        // And it recommends that they are dispatched *throughout* the frame generation
-        // rather than only at the end
-
-        // So to start we can submit a CB for clearing the render target and depth
-        // buffers (we would actually want to do that AFTER we submit all the work
-        // for the current frame so it can process the clear as soon as possible)
-
-        // Now throughout the frame what do we do
-
-        // We collect calls to submit_mesh() throughout the frame
-        // Each of these call will be associated with a particular pipeline
-        // each pipeline in turn needs its own command buffer (technically
-        // not since we can switch pipelines in the command buffer. But
-        // indeed pipeline switches are HEAVY)
-        // So how does submit mesh work then?
-        // if a submit comes in for a model such that they interleave pipelines
-        // Then we're dead in the water
-
-        // So each pipeline should have a separate set of command buffers
-        // each following the heuristic pattern below?
-
-        // We will ignore multithreading for now since we would need to
-        // share threads with a library
-
-        // The process to create and submit a command buffer is:
-        // Create an encoder using Device
-        // Then to record commands, create a render pass from the encoder
-        // commands are recorded
-        // the render pass is dropped
-        // optionally more passes (computer, or more render) can be created
-        // A CommandBuffer is created by .finish()ing the encoder
-        // the CommandBuffer is submitted to the GPU via Queue::submit()
-
-        // It feels like we want an encoder to have an active render pass
-        // for every pipeline which we can then somehow sleep (the lifetime)
-        // and wait for more commands to arrive, until we hit a threshold
-        // then we destroy and finish the render pass/encoder and submit it
-
-        // The main challenge is:
-        // How do we create a render pass such that it lasts exactly as long
-        // as we need it to. Ie. Create it in one scope, submit to it in another
-        // and then decide that it is time to destroy it in a third...
-        //
-        // Feels like we could store the pass in an option in a small struct
-        // that bounds the lifetimes correctly. Then we can cause a drop
-        // at any time by reset()ing the option but this add the matching
-        // overhead to every mesh_submit call
-        //
-        // Lets think: So technically if we name a lifetime for the encoder
-        // and the render pass, they are identical, so the
     }
 }
-
-// As a side note we could use a heuristic check on the number of submitted buffers
-// to increase or decrease the number of work submissions that happen per frame
-//
-// For example we have a mesh_submits_per_gpu_submit and target_gpu_submits
-// Then as we record our commands we use mesh_submits_per_gpu_submit to truncate
-// command buffers and submit them to the GPU, recording each gpu submit
-// Then at the end of a frame we check if we're over or under target_gpu_submits
-// and then modify mesh_submits_per_gpu_submit to inch closer to that target

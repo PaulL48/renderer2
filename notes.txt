@@ -1,0 +1,21 @@
+
+// As a side note we could use a heuristic check on the number of submitted buffers
+// to increase or decrease the number of work submissions that happen per frame
+//
+// For example we have a mesh_submits_per_gpu_submit and target_gpu_submits
+// Then as we record our commands we use mesh_submits_per_gpu_submit to truncate
+// command buffers and submit them to the GPU, recording each gpu submit
+// Then at the end of a frame we check if we're over or under target_gpu_submits
+// and then modify mesh_submits_per_gpu_submit to inch closer to that target
+
+/*
+    AddLine
+    AddCross
+    AddSphere
+    AddCircle
+    AddAxes
+    AddTriangle
+    AddAABB
+    AddOBB
+    AddString
+*/

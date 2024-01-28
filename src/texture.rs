@@ -3,11 +3,11 @@ use wgpu::{
     TextureDescriptor, TextureDimension, TextureFormat, TextureView, TextureViewDescriptor,
 };
 
-pub struct BinaryTexture<'a> {
-    data: &'a [u8],
-    format: TextureFormat,
-    width: u32,
-    height: u32,
+pub struct TextureSource {
+    pub data: Vec<u8>,
+    pub format: TextureFormat,
+    pub width: u32,
+    pub height: u32,
 }
 
 pub struct Texture {
@@ -72,12 +72,7 @@ impl Texture {
         }
     }
 
-    pub fn from_binary(
-        device: &Device,
-        queue: &Queue,
-        label: &str,
-        binary_texture: &BinaryTexture,
-    ) -> Self {
+    pub fn from_source(device: &Device, queue: &Queue, binary_texture: &TextureSource) -> Self {
         let size = Extent3d {
             width: binary_texture.width,
             height: binary_texture.height,
@@ -85,7 +80,7 @@ impl Texture {
         };
 
         let texture = device.create_texture(&TextureDescriptor {
-            label: Some(label),
+            label: None,
             size,
             mip_level_count: 1,
             sample_count: 1,
@@ -102,7 +97,7 @@ impl Texture {
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
             },
-            binary_texture.data,
+            &binary_texture.data,
             wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(Texture::bytes_per_row(
@@ -117,7 +112,7 @@ impl Texture {
         let view = texture.create_view(&TextureViewDescriptor::default());
 
         let sampler = device.create_sampler(&SamplerDescriptor {
-            label: Some(label),
+            label: None,
             address_mode_u: AddressMode::ClampToEdge,
             address_mode_v: AddressMode::ClampToEdge,
             address_mode_w: AddressMode::ClampToEdge,
@@ -126,7 +121,7 @@ impl Texture {
             mipmap_filter: FilterMode::Nearest,
             lod_min_clamp: 0.0,
             lod_max_clamp: 100.0,
-            compare: Some(CompareFunction::LessEqual),
+            compare: None,
             ..Default::default()
         });
 

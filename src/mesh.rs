@@ -1,56 +1,47 @@
-// A mesh is a collection of vertices
-// A vertex is a collection of attributes, usually at minimum containing a position
-// but optionally containing UV coordinates, normals, color, etc...
-
-// We want to guarantee uniqueness for vertex buffers. We really don't want to
-// create duplicate buffers for the same vertex data
-
-// We also don't want to create and destroy the vertex buffer every frame
-//
-
-use std::{collections::HashMap, slice::Iter};
-
-use slot_map::SlotMapIndex;
-use wgpu::{Device, RenderPass};
-
 use crate::{
-    material::Material,
+    material_cache::MaterialCache,
     pipeline_configuration::PipelineConfiguration,
     sub_mesh::{SubMesh, SubMeshSource},
+    uniform_group::UniformGroup,
+    UniformGroupSource,
 };
+use slot_map::SlotMapIndex;
+use std::collections::HashMap;
+use wgpu::{Device, RenderPass};
 
 pub type MeshHandle = SlotMapIndex;
 
 pub struct Mesh {
     name: String,
     sub_meshes: Vec<SubMesh>,
+    mesh_uniform_group: UniformGroup,
     pipeline: SlotMapIndex,
 }
 
-pub trait MeshSource {
-    fn name(&self) -> String;
-    fn sub_meshes(&self) -> Iter<&dyn SubMeshSource>;
-    fn pipeline_configuration(&self) -> PipelineConfiguration;
+pub struct MeshSource {
+    pub name: String,
+    pub sub_meshes: Vec<SubMeshSource>,
+    pub mesh_uniform_group: UniformGroupSource,
+    pub pipeline_configuration: PipelineConfiguration,
 }
 
 impl Mesh {
     pub fn from_source(
         device: &Device,
         pipeline_lookup: &HashMap<PipelineConfiguration, SlotMapIndex>,
-        source: &dyn MeshSource,
+        source: &MeshSource,
     ) -> Self {
         let mut sub_meshes = Vec::new();
-        for sub_mesh in source.sub_meshes() {
-            let sub_mesh = SubMesh::from_source(device, *sub_mesh);
+        for sub_mesh in &source.sub_meshes {
+            let sub_mesh = SubMesh::from_source(device, sub_mesh);
             sub_meshes.push(sub_mesh);
         }
 
         Self {
-            name: source.name(),
+            name: source.name.clone(),
             sub_meshes,
-            pipeline: *pipeline_lookup
-                .get(&source.pipeline_configuration())
-                .unwrap(),
+            mesh_uniform_group: UniformGroup::from_source(&source.mesh_uniform_group, device),
+            pipeline: *pipeline_lookup.get(&source.pipeline_configuration).unwrap(),
         }
     }
 
@@ -61,9 +52,15 @@ impl Mesh {
     pub fn record_commands<'a>(
         &'a self,
         render_pass: &mut RenderPass<'a>,
-        first_available_bind_group: u32,
-        material_cache: &'a HashMap<&'static str, Material>,
+        mut first_available_bind_group: u32,
+        material_cache: &'a MaterialCache,
     ) {
+        render_pass.set_bind_group(
+            first_available_bind_group,
+            self.mesh_uniform_group.bind_group(),
+            &[],
+        );
+        first_available_bind_group += 1;
         for sub_mesh in &self.sub_meshes {
             sub_mesh.record_commands(render_pass, first_available_bind_group, material_cache);
         }

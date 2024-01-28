@@ -1,39 +1,22 @@
-// With the previous renderer we specified a list of mesh-submesh groups for a pipeline and
-// then in the render function expose the this list for the user to specify calls for as they like
-
-// This might be better off as a higher level API where the user simply asks the renderer to render
-// a mesh-submesh group when they want and not store anything persistent on the renderer side
-
-// This leave open how a particular model will specify how to render itself if we only have a
-// .draw() method on it (or submit_draw())
-// We could supply a state modifying function that is run per-submesh to configure the vertex buffer
-// the bind groups for materials and the indices. Instancing would seem to be better either left out
-// or handled transparently in the renderer
-
-// Some challenges:
-// The render pass is a temporary object that only exists briefly to allow command buffer creation
-
-use std::collections::HashMap;
-
-use slot_map::SlotMap;
-use wgpu::{
-    BindGroup, BindGroupLayout, BindGroupLayoutDescriptor,
-    CommandEncoderDescriptor, Device, PipelineLayoutDescriptor, Queue, RenderPassDescriptor,
-    RenderPipeline, RenderPipelineDescriptor, StoreOp, TextureFormat, TextureView, VertexState,
-};
-
 use crate::{
-    material::Material,
+    material_cache::MaterialCache,
     mesh::{Mesh, MeshHandle},
     pipeline_configuration::PipelineConfiguration,
+    uniform_group::{UniformGroup, UniformGroupSource},
     Renderer,
+};
+use slot_map::SlotMap;
+use wgpu::{
+    BindGroupLayout, BindGroupLayoutDescriptor, CommandEncoderDescriptor, Device,
+    PipelineLayoutDescriptor, Queue, RenderPassDescriptor, RenderPipeline,
+    RenderPipelineDescriptor, StoreOp, TextureFormat, TextureView, VertexState,
 };
 
 pub struct Pipeline {
     pipeline: RenderPipeline,
     configuration: PipelineConfiguration,
     bind_group_layouts: Vec<BindGroupLayout>,
-    global_bind_groups: Vec<BindGroup>,
+    global_bind_groups: Vec<UniformGroup>,
     draw_queue: Vec<MeshHandle>,
 }
 
@@ -126,7 +109,7 @@ impl Pipeline {
         depth_texture: &TextureView,
         mesh: MeshHandle,
         mesh_cache: &SlotMap<Mesh>,
-        material_cache: &HashMap<&'static str, Material>,
+        material_cache: &MaterialCache,
     ) {
         self.draw_queue.push(mesh);
 
@@ -143,8 +126,9 @@ impl Pipeline {
         }
     }
 
-    pub fn add_global_bind_group(&mut self) {
-        todo!()
+    pub fn add_global_bind_group(&mut self, source: &UniformGroupSource, device: &Device) {
+        let uniform_group = UniformGroup::from_source(source, device);
+        self.global_bind_groups.push(uniform_group);
     }
 
     pub fn flush_queue(
@@ -154,7 +138,7 @@ impl Pipeline {
         render_target: &TextureView,
         depth_texture: &TextureView,
         mesh_cache: &SlotMap<Mesh>,
-        material_cache: &HashMap<&'static str, Material>,
+        material_cache: &MaterialCache,
     ) {
         if self.draw_queue.is_empty() {
             return;
@@ -177,7 +161,7 @@ impl Pipeline {
         render_target: &TextureView,
         depth_texture: &TextureView,
         mesh_cache: &SlotMap<Mesh>,
-        material_cache: &HashMap<&'static str, Material>,
+        material_cache: &MaterialCache,
     ) {
         // Submit this work
         // create
@@ -213,7 +197,7 @@ impl Pipeline {
 
             // Set global bind groups
             for (i, global_bind_group) in self.global_bind_groups.iter().enumerate() {
-                render_pass.set_bind_group(i as u32, global_bind_group, &[]);
+                render_pass.set_bind_group(i as u32, global_bind_group.bind_group(), &[]);
             }
 
             // Record commands
@@ -227,29 +211,3 @@ impl Pipeline {
         queue.submit([command_buffer]);
     }
 }
-
-// This seems logical:
-// Each variant of BindingType is being covered in different pathways
-// to do their own things
-
-// For Sampler/Texture we've got Material
-
-// For Buffer we'll have its own thing too
-
-// We want to make it rather more generic than the previous way the camera was setup
-// but at the same time we don't want to make setting the camera as a pipeline global
-// annoying for *every* pipeline
-
-// What do we need? We need a &[u8] and an entry layout for every buffer entry
-// Though even then the layout for a buffer entry is pretty simple and the same for
-// every single one, unless it wants to specify an offset
-
-// The other unique consideration here is that we're likely updating these buffers
-// every frame for the camera.
-
-// We could use a handle: BufferHandle or UniformHandle
-
-// The other consideration is that we don't have a handle to a buffer,
-// we have a handle to a bind group element
-
-// but in the end we update buffers and bind bind groups

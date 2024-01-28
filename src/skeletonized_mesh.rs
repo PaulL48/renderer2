@@ -1,1 +1,0 @@
-// A skeletonized mesh is a mesh with an associated skeleton

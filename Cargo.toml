@@ -12,3 +12,4 @@ pollster = "0.3"
 slot_map = { git = "https://github.com/PaulL48/rust_slot_map.git" }
 image = "0.24"
 log = "0.4"
+derive_builder = "0.13"
