@@ -19,3 +19,10 @@
     AddOBB
     AddString
 */
+
+
+Regarding debug rendering
+
+It seems like architecturally it would be wiser to develop a low level renderer layer
+on top of which shaders can be built and used, then add a layer that provides the debug functionality
+

@@ -1,7 +1,6 @@
 use crate::{
-    debug_pipelines::LINE_WORLD_SPACE_DEPTH_ENABLED_DEBUG_PIPELINE, debug_data::DebugData, material::{Material, MaterialSource}, material_cache::MaterialCache, mesh::{Mesh, MeshHandle, MeshSource}, pipeline::Pipeline, pipeline_configuration::PipelineConfiguration, renderer_configuration::RendererConfiguration, texture::Texture, uniform_group::UniformGroupSource
+    material::{Material, MaterialSource}, material_cache::MaterialCache, mesh::{Mesh, MeshHandle, MeshSource}, pipeline::Pipeline, pipeline_configuration::PipelineConfiguration, renderer_configuration::RendererConfiguration, texture::Texture, uniform_group::UniformGroupSource
 };
-use glam::Vec3;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use slot_map::{SlotMap, SlotMapIndex};
 use std::collections::{HashMap, HashSet};
@@ -26,8 +25,6 @@ pub struct Renderer {
 
     surface_texture: Option<SurfaceTexture>,
     surface_view: Option<TextureView>,
-
-    debug_data: DebugData,
 }
 
 impl Renderer {
@@ -129,8 +126,6 @@ impl Renderer {
             array_layer_count: None,
         });
 
-        let debug_data = DebugData::new(&device);
-
         Ok(Self {
             surface,
             surface_configuration,
@@ -143,7 +138,6 @@ impl Renderer {
             material_cache: MaterialCache::new(),
             surface_texture: Some(output),
             surface_view: Some(view),
-            debug_data,
         })
     }
 
@@ -285,80 +279,5 @@ impl Renderer {
 
         let commands = encoder.finish();
         self.queue.submit([commands]);
-    }
-
-    fn submit_debug_primitives(&mut self) {
-        let mut to_remove = Vec::new();
-
-        for primitive in &self.debug_data.primitives {
-            // This is just self.submit_mesh() but makes the borrow
-            // checker happy
-            let mesh = self.mesh_cache.get(&primitive.mesh()).unwrap();
-
-            self.pipelines
-                .get_mut(mesh.pipeline())
-                .unwrap()
-                .submit_mesh(
-                    &self.device,
-                    &self.queue,
-                    self.surface_view.as_ref().unwrap(),
-                    self.depth_texture.view(),
-                    primitive.mesh(),
-                    &self.mesh_cache,
-                    &self.material_cache,
-                );
-
-            if primitive.expiry() <= self.debug_data.current_simulation_time {
-                to_remove.push(primitive.primitive_handle());
-            }
-        }
-
-        for primitive in to_remove {
-            self.debug_data.primitives.remove(&primitive);
-        }
-    }
-}
-
-pub enum Space {
-    ScreenSpace,
-    WorldSpace,
-}
-
-// Debug API
-// This adds a codependency on glam
-impl Renderer {
-
-    pub fn debug_initialize(&mut self) {
-        self.register_pipeline(&LINE_WORLD_SPACE_DEPTH_ENABLED_DEBUG_PIPELINE).unwrap();
-    }
-
-    // Since the renderer has no concept of a camera
-    // we need to give it one in the debugger
-    pub fn debug_update_camera() {}
-
-    pub fn submit_line(
-        &mut self,
-        from: &Vec3,
-        to: &Vec3,
-        color: &Vec3,
-        thickness: f32,
-        duration: f32,
-        depth_enabled: bool,
-        space: Space
-    ) {
-
-    }
-
-    pub fn submit_cross() {}
-    pub fn submit_sphere() {}
-    pub fn submit_circle() {}
-    pub fn submit_axes() {}
-    pub fn submit_triangle() {}
-    pub fn submit_aabb() {}
-    pub fn submit_obb() {}
-    pub fn submit_string() {}
-
-    fn cull_expired_primitives(&mut self) {
-
     }
 }

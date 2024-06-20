@@ -9,8 +9,6 @@ mod sub_mesh;
 mod texture;
 mod uniform;
 mod uniform_group;
-mod debug_pipelines;
-mod debug_data;
 
 pub use material::MaterialSource;
 pub use mesh::MeshSource;
