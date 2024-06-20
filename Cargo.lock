@@ -463,6 +463,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "151665d9be52f9bb40fc7966565d39666f2d1e69233571b71b87791c7e0528b3"
+
+[[package]]
 name = "glow"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -949,9 +955,12 @@ checksum = "216080ab382b992234dda86873c18d4c48358f5cfcb70fd693d7f6f2131b628b"
 name = "renderer2"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "derive_builder",
+ "glam",
  "image",
  "log",
+ "once_cell",
  "pollster",
  "raw-window-handle",
  "slot_map",
