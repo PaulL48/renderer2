@@ -8,8 +8,8 @@ use crate::{
 use slot_map::SlotMap;
 use wgpu::{
     BindGroupLayout, BindGroupLayoutDescriptor, CommandEncoderDescriptor, Device,
-    PipelineLayoutDescriptor, Queue, RenderPassDescriptor, RenderPipeline,
-    RenderPipelineDescriptor, StoreOp, TextureFormat, TextureView, VertexState,
+    PipelineCompilationOptions, PipelineLayoutDescriptor, Queue, RenderPassDescriptor,
+    RenderPipeline, RenderPipelineDescriptor, StoreOp, TextureFormat, TextureView, VertexState,
 };
 
 pub struct Pipeline {
@@ -58,6 +58,7 @@ impl Pipeline {
                 module: &shader,
                 entry_point: &configuration.vertex_shader_entrypoint,
                 buffers: &configuration.vertex_buffer_layouts,
+                compilation_options: PipelineCompilationOptions::default(),
             },
             primitive: wgpu::PrimitiveState {
                 topology: configuration.topology,
@@ -88,6 +89,7 @@ impl Pipeline {
                     blend: configuration.fragment_shader_blend_mode,
                     write_mask: configuration.fragment_shader_write_mask,
                 })],
+                compilation_options: PipelineCompilationOptions::default(),
             }),
             multiview: None,
         });
@@ -163,11 +165,6 @@ impl Pipeline {
         mesh_cache: &SlotMap<Mesh>,
         material_cache: &MaterialCache,
     ) {
-        // Submit this work
-        // create
-
-        // Do any data synchronization that the models need
-
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
         {
             let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -203,7 +200,11 @@ impl Pipeline {
             // Record commands
             for mesh_handle in &self.draw_queue {
                 let mesh = mesh_cache.get(mesh_handle).unwrap();
-                mesh.record_commands(&mut render_pass, 1, material_cache);
+                mesh.record_commands(
+                    &mut render_pass,
+                    self.global_bind_groups.len() as u32,
+                    material_cache,
+                );
             }
         }
 

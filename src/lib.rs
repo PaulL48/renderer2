@@ -20,3 +20,7 @@ pub use sub_mesh::SubMeshSource;
 pub use texture::TextureSource;
 pub use uniform::UniformSource;
 pub use uniform_group::UniformGroupSource;
+
+// Re-exports
+
+pub use wgpu::InstanceFlags;

@@ -1,7 +1,14 @@
 use crate::{
-    material::{Material, MaterialSource}, material_cache::MaterialCache, mesh::{Mesh, MeshHandle, MeshSource}, pipeline::Pipeline, pipeline_configuration::PipelineConfiguration, renderer_configuration::RendererConfiguration, texture::Texture, uniform_group::UniformGroupSource
+    material::{Material, MaterialSource},
+    material_cache::MaterialCache,
+    mesh::{Mesh, MeshHandle, MeshSource},
+    pipeline::Pipeline,
+    pipeline_configuration::PipelineConfiguration,
+    renderer_configuration::RendererConfiguration,
+    texture::Texture,
+    uniform_group::UniformGroupSource,
 };
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use slot_map::{SlotMap, SlotMapIndex};
 use std::collections::{HashMap, HashSet};
 use wgpu::{
@@ -11,8 +18,8 @@ use wgpu::{
     SurfaceTexture, TextureFormat, TextureView,
 };
 
-pub struct Renderer {
-    surface: Surface,
+pub struct Renderer<'a> {
+    surface: Surface<'a>,
     surface_configuration: SurfaceConfiguration,
     device: Device,
     queue: Queue,
@@ -27,12 +34,12 @@ pub struct Renderer {
     surface_view: Option<TextureView>,
 }
 
-impl Renderer {
+impl<'a> Renderer<'a> {
     pub const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
-    pub fn new<W>(window: &W, configuration: &RendererConfiguration) -> Result<Self, String>
+    pub fn new<W>(window: &'a W, configuration: &RendererConfiguration) -> Result<Self, String>
     where
-        W: HasRawWindowHandle + HasRawDisplayHandle,
+        W: HasWindowHandle + HasDisplayHandle + Send + Sync,
     {
         let instance_descriptor = InstanceDescriptor {
             backends: /*wgpu::Backends::DX11
@@ -45,7 +52,7 @@ impl Renderer {
             gles_minor_version: Gles3MinorVersion::Automatic,
         };
         let instance = Instance::new(instance_descriptor);
-        let surface = unsafe { instance.create_surface(window).unwrap() };
+        let surface = instance.create_surface(window).unwrap();
         let adapter = instance.request_adapter(&RequestAdapterOptions {
             power_preference: PowerPreference::HighPerformance,
             force_fallback_adapter: false,
@@ -57,8 +64,8 @@ impl Renderer {
         let device_queue = adapter.request_device(
             &DeviceDescriptor {
                 label: None,
-                features: Features::empty(),
-                limits: Limits::downlevel_defaults(),
+                required_features: Features::empty(),
+                required_limits: Limits::downlevel_defaults(),
             },
             None,
         );
@@ -87,6 +94,7 @@ impl Renderer {
                 present_mode: wgpu::PresentMode::Mailbox,
                 alpha_mode: wgpu::CompositeAlphaMode::Auto,
                 view_formats: [].to_vec(),
+                desired_maximum_frame_latency: 2,
             }
         } else {
             wgpu::SurfaceConfiguration {
@@ -97,6 +105,7 @@ impl Renderer {
                 present_mode: wgpu::PresentMode::Fifo,
                 alpha_mode: wgpu::CompositeAlphaMode::Auto,
                 view_formats: [].to_vec(),
+                desired_maximum_frame_latency: 2,
             }
         };
 
